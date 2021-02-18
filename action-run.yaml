@@ -1,11 +1,3 @@
-name: Build
-
-on:
-  push:
-    branches: [ master, develop, release/* , feature/* ]
-  pull_request:
-    branches: [ master, develop, release/* , feature/* ]
-
 jobs:
   # ===========================================================================================
   # Get Next Version Number

@@ -1,0 +1,143 @@
+name: Build
+
+on:
+  push:
+    branches: [ master, develop, release/* , feature/* ]
+  pull_request:
+    branches: [ master, develop, release/* , feature/* ]
+env:
+  DOTNET_BUILD_CONFIG: DEBUG
+  DOTNET_SOLTION_NAME: src/ghatest/ghatest.sln
+ 
+jobs:
+  # ===========================================================================================
+  # Get Next Version Number
+  # ===========================================================================================
+  # Run semantic-release in dry run mode, extract the next release version number and set the
+  # nextVersionNumber variable for the following jobs to use.
+
+  # NOTE: if semantic-release doesn't detect any changes requiring a release, the version will
+  # be set to 0.0.0
+  # ===========================================================================================
+  detect_semver:
+    if: "!contains(github.event.head_commit.message, 'skip ci')"
+    name: Compute Next Version
+    runs-on: ubuntu-latest
+    outputs:
+      next_version_number: ${{ steps.get_next_version_number_step.outputs.next_version_number }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+
+      - name: Run semantic release to get next version number
+        id: get_next_version_number_step
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          semanticReleaseOutput=$(npx \
+              --quiet \
+              -p semantic-release@17.0.8 \
+              -p @semantic-release/changelog@5.0.1 \
+              -p @semantic-release/git@9.0.0 \
+              -p @semantic-release/exec@5.0.0 \
+              semantic-release --dry-run)
+          nextVersion=$(echo "$semanticReleaseOutput" \
+            | sed -n 's/.* The next release version is \(.*\)$/\1/gip')
+          echo "$semanticReleaseOutput"
+          if [ -z "$nextVersion" ]
+          then
+            echo "::set-output name=next_version_number::0.0.0"
+          else
+            echo "The next release version is ${nextVersion}"
+            echo "::set-output name=next_version_number::$nextVersion"
+            echo "NEXT_VERSION=$nextVersion" >> $GITHUB_ENV
+          fi
+  build_ci:
+    name: Build CI
+    needs: detect_semver
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+
+      # Install .NET Core 3.1.x
+      - name: Install dotnet sdk 3.1.x
+        uses: actions/setup-dotnet@v1
+        with:
+          dotnet-version: 3.1.x
+      
+      - name: Install Octopus CLI
+        run: |
+          sudo apt update && sudo apt install --no-install-recommends gnupg curl ca-certificates apt-transport-https && \
+          curl -sSfL https://apt.octopus.com/public.key | sudo apt-key add - && \
+          sudo sh -c "echo deb https://apt.octopus.com/ stable main > /etc/apt/sources.list.d/octopus.com.list" && \
+          sudo apt update && sudo apt install octopuscli
+  
+      - name: Build & Pacakge Solution
+        run: |
+              dotnet restore $DOTNET_SOLTION_NAME
+              dotnet build $DOTNET_SOLTION_NAME --configuration Release --no-restore
+              dotnet publish $DOTNET_SOLTION_NAME -o 'publish/' --configuration Release
+              octo pack --id myapp --version ${{needs.detect_semver.outputs.next_version_number}} --basePath 'publish/'
+       
+      - name: 'Publish artifacts'
+        if: needs.detect_semver.outputs.next_version_number != '0.0.0' 
+        uses: actions/upload-artifact@v2
+        with:
+           name: myapp.${{ needs.detect_semver.outputs.next_version_number }}.nupkg
+           path: ${{ github.workspace }}/publish
+           
+      - name: Run semantic release to release if relevant changes
+        if: needs.detect_semver.outputs.next_version_number != '0.0.0' 
+        id: get_next_version_number_step
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -Eeuo pipefail
+          npx --quiet \
+            -p semantic-release@17.0.8 \
+            -p @semantic-release/changelog@5.0.1 \
+            -p @semantic-release/git@9.0.0 \
+            -p @semantic-release/exec@5.0.0 \
+            semantic-release
+  release_job:
+    runs-on: ubuntu-latest
+    needs: [build_ci, detect_semver]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+
+      # Download the stored package
+      - name: Download artifacts
+        uses: actions/download-artifact@v2
+        with:
+          name: myapp.${{ needs.detect_semver.outputs.next_version_number }}.nupkg
+          path: ${{ github.workspace }}/publish
+
+      - name: Setup JFrog CLI
+        uses: jfrog/setup-jfrog-cli@v1.1.0
+        env:
+            JF_ARTIFACTORY_SERVER_JWT: ${{ secrets.JFROG_SERVER_JWT }}
+      
+      - name: Ping
+        run: jfrog rt ping
+      
+      - name: Push Latest package to Artifatory
+        run: |
+          # Upload package 
+          jfrog rt u '${{ github.workspace }}/publish/*' nuget-scratch-local/myapp.${{ needs.detect_semver.outputs.next_version_number }}.nupkg 
+          # Publish the build info
+          jfrog rt bce
+          jfrog rt bag
+          jfrog rt bp

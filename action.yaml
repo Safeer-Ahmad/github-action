@@ -1,0 +1,6 @@
+# action.yaml
+name: 'netcore-app-ci'
+description: 'Action to build, test, package and deploy .net core app to jFrog'
+runs:
+  using: 'docker'
+  image: 'Dockerfile'

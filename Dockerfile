@@ -1,9 +1,5 @@
 # Base image
 FROM alpine:latest
- 
-# installes required packages for our script
-RUN apk add --no-cache
-
 # Copies your code file  repository to the filesystem
 COPY action-run-bash.sh /action-run-bash.sh
  

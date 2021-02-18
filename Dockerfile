@@ -1,5 +1,6 @@
 # Base image
 FROM alpine:latest
+
 # Copies your code file  repository to the filesystem
 COPY action-run-bash.sh /action-run-bash.sh
  

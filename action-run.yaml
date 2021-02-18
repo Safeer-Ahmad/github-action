@@ -5,10 +5,7 @@ on:
     branches: [ master, develop, release/* , feature/* ]
   pull_request:
     branches: [ master, develop, release/* , feature/* ]
-env:
-  DOTNET_BUILD_CONFIG: DEBUG
-  DOTNET_SOLTION_NAME: src/ghatest/ghatest.sln
- 
+
 jobs:
   # ===========================================================================================
   # Get Next Version Number
@@ -82,6 +79,8 @@ jobs:
   
       - name: Build & Pacakge Solution
         run: |
+              echo "The Solution name is:  ${DOTNET_SOLTION_NAME}"
+
               dotnet restore $DOTNET_SOLTION_NAME
               dotnet build $DOTNET_SOLTION_NAME --configuration Release --no-restore
               dotnet publish $DOTNET_SOLTION_NAME -o 'publish/' --configuration Release
